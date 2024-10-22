@@ -428,7 +428,9 @@
   },
   "libraries": {
     "pinned_footprint_libs": [],
-    "pinned_symbol_libs": []
+    "pinned_symbol_libs": [
+      "Senior Design"
+    ]
   },
   "meta": {
     "filename": "KiCad-Test.kicad_pro",
