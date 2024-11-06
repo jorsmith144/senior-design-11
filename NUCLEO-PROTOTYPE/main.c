@@ -67,6 +67,8 @@ ETH_TxPacketConfig TxConfig;
 
 ADC_HandleTypeDef hadc1;
 
+DAC_HandleTypeDef hdac;
+
 ETH_HandleTypeDef heth;
 
 TIM_HandleTypeDef htim8;
@@ -78,7 +80,9 @@ PCD_HandleTypeDef hpcd_USB_OTG_FS;
 /* USER CODE BEGIN PV */
 char txbuffer[25];
 uint32_t adc_result = 0;
+float adc_voltage = 0.0;
 int counter = 0;
+float convert = (1.0f / 4095.0f) * 3.3f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -89,6 +93,7 @@ static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM8_Init(void);
+static void MX_DAC_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -130,9 +135,13 @@ int main(void)
   MX_USB_OTG_FS_PCD_Init();
   MX_ADC1_Init();
   MX_TIM8_Init();
+  MX_DAC_Init();
   /* USER CODE BEGIN 2 */
   HAL_ADC_Start_IT(&hadc1);
   HAL_TIM_Base_Start(&htim8);
+  GPIOB->MODER &= ~(0x3 << (0 * 2)); // Clear mode for PB0
+  GPIOB->MODER |= (0x1 << (0 * 2));  // Set PB0 to output mode (01)
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -246,7 +255,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_9;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -254,6 +263,46 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief DAC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_DAC_Init(void)
+{
+
+  /* USER CODE BEGIN DAC_Init 0 */
+
+  /* USER CODE END DAC_Init 0 */
+
+  DAC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN DAC_Init 1 */
+
+  /* USER CODE END DAC_Init 1 */
+
+  /** DAC Initialization
+  */
+  hdac.Instance = DAC;
+  if (HAL_DAC_Init(&hdac) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** DAC channel OUT1 config
+  */
+  sConfig.DAC_Trigger = DAC_TRIGGER_NONE;
+  sConfig.DAC_OutputBuffer = DAC_OUTPUTBUFFER_ENABLE;
+  if (HAL_DAC_ConfigChannel(&hdac, &sConfig, DAC_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN DAC_Init 2 */
+
+  /* USER CODE END DAC_Init 2 */
 
 }
 
@@ -325,9 +374,9 @@ static void MX_TIM8_Init(void)
 
   /* USER CODE END TIM8_Init 1 */
   htim8.Instance = TIM8;
-  htim8.Init.Prescaler = 1;
+  htim8.Init.Prescaler = 100 - 1;
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim8.Init.Period = 1125;
+  htim8.Init.Period = 45 - 1;
   htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim8.Init.RepetitionCounter = 0;
   htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -484,12 +533,14 @@ static void MX_GPIO_Init(void)
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     if (hadc->Instance == ADC1) {
         // Read the converted ADC value
+    	GPIOB->ODR |= (1 << 0);
         adc_result = HAL_ADC_GetValue(hadc);
+        adc_voltage = (adc_result * convert);
 
-
-        sprintf (txbuffer, "%d\r",(int)adc_result);
-        HAL_UART_Transmit(&huart3, (uint8_t *)txbuffer, strlen(txbuffer), HAL_MAX_DELAY);
-        counter++;
+        //sprintf (txbuffer, "%.6f\r",adc_voltage);
+        //HAL_UART_Transmit(&huart3, (uint8_t *)txbuffer, strlen(txbuffer), HAL_MAX_DELAY);
+        GPIOB->ODR &= ~(1 << 0);
+        //counter++;
         // Process adcValue as needed (e.g., store, transmit, or display it)
 
     }
