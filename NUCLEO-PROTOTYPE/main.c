@@ -26,6 +26,7 @@
 #include "stm32f7xx.h"
 #include "stm32f7xx_hal_def.h"
 #include <stdio.h>
+#include <math.h>
 
 /* USER CODE END Includes */
 
@@ -37,7 +38,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define FREQ_SAMPLE 48000
-
+#define FREQ_CENTER 1000
+#define BANDWIDTH 50
+#define GAIN 0.1
+#define PI 3.14159
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -78,22 +82,55 @@ UART_HandleTypeDef huart3;
 PCD_HandleTypeDef hpcd_USB_OTG_FS;
 
 /* USER CODE BEGIN PV */
-char txbuffer[25];
+static int y[3] = {0, 0, 0};
+static int x[3] = {0, 0, 0};
+
 uint32_t adc_result = 0;
+uint32_t dac_result = 0;
+
 float adc_voltage = 0.0;
-int counter = 0;
 float convert = (1.0f / 4095.0f) * 3.3f;
+float dac_voltage = 0.0;
+
+float sample_time;
+float RAD_CENTER;
+float WC_RPS;
+float WBW_RPS;
+float Q;
+float a0, a1, a2;
+float b0, b1, b2;
+
+// Function to initialize all values
+void init_var() {
+    sample_time = 1.0 / 48000.0f;
+    RAD_CENTER = 2 * PI * FREQ_CENTER;
+    WC_RPS = (2 / sample_time) * tan(RAD_CENTER * sample_time / 2);  // radians per second
+    WBW_RPS = (2 * PI * BANDWIDTH);                                  // bandwidth
+    Q = WC_RPS / WBW_RPS;
+
+    //WC_RPS = (2 / sample_time) * tan(WC_RPS * sample_time / 2);
+
+    a0 = 4 + 2 * (GAIN / Q) * (WC_RPS * sample_time) + (WC_RPS * sample_time) * (WC_RPS * sample_time);
+    a1 = 2 * (WC_RPS * sample_time) * (WC_RPS * sample_time) - 8;
+    a2 = 4 - 2 * (GAIN / Q) * (WC_RPS * sample_time) + (WC_RPS * sample_time) * (WC_RPS * sample_time);
+
+    b0 = 1 / (4 + 2 * (1 / Q) * (WC_RPS * sample_time) + (WC_RPS * sample_time) * (WC_RPS * sample_time));
+    b1 = -(2 * (WC_RPS * sample_time) * (WC_RPS * sample_time) - 8);
+    b2 = -(4 - 2 * (1 / Q) * (WC_RPS * sample_time) + (WC_RPS * sample_time) * (WC_RPS * sample_time));
+}
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_ETH_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_USB_OTG_FS_PCD_Init(void);
 static void MX_ADC1_Init(void);
-static void MX_TIM8_Init(void);
 static void MX_DAC_Init(void);
+static void MX_ETH_Init(void);
+static void MX_TIM8_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -106,10 +143,13 @@ static void MX_DAC_Init(void);
   * @brief  The application entry point.
   * @retval int
   */
+
+
 int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -130,18 +170,24 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_ETH_Init();
   MX_USART3_UART_Init();
   MX_USB_OTG_FS_PCD_Init();
   MX_ADC1_Init();
-  MX_TIM8_Init();
   MX_DAC_Init();
+  MX_ETH_Init();
+  MX_TIM8_Init();
+  init_var();
   /* USER CODE BEGIN 2 */
   HAL_ADC_Start_IT(&hadc1);
   HAL_TIM_Base_Start(&htim8);
   GPIOB->MODER &= ~(0x3 << (0 * 2)); // Clear mode for PB0
   GPIOB->MODER |= (0x1 << (0 * 2));  // Set PB0 to output mode (01)
 
+
+
+  HAL_DAC_Start(&hdac, DAC_CHANNEL_1);
+
+  //dac_voltage = dac_result /convert;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -156,6 +202,8 @@ int main(void)
   }
   /* USER CODE END 3 */
 }
+
+
 
 /**
   * @brief System Clock Configuration
@@ -253,9 +301,9 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_9;
+  sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -374,9 +422,9 @@ static void MX_TIM8_Init(void)
 
   /* USER CODE END TIM8_Init 1 */
   htim8.Instance = TIM8;
-  htim8.Init.Prescaler = 100 - 1;
+  htim8.Init.Prescaler = 100-1;
   htim8.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim8.Init.Period = 45 - 1;
+  htim8.Init.Period = 45-1;
   htim8.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim8.Init.RepetitionCounter = 0;
   htim8.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
@@ -418,7 +466,7 @@ static void MX_USART3_UART_Init(void)
 
   /* USER CODE END USART3_Init 1 */
   huart3.Instance = USART3;
-  huart3.Init.BaudRate = 2000000;
+  huart3.Init.BaudRate = 115200;
   huart3.Init.WordLength = UART_WORDLENGTH_8B;
   huart3.Init.StopBits = UART_STOPBITS_1;
   huart3.Init.Parity = UART_PARITY_NONE;
@@ -492,6 +540,9 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOG_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, LD1_Pin|LD3_Pin|LD2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
@@ -502,6 +553,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(USER_Btn_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA5 */
+  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pins : LD1_Pin LD3_Pin LD2_Pin */
   GPIO_InitStruct.Pin = LD1_Pin|LD3_Pin|LD2_Pin;
@@ -523,6 +581,9 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(USB_OverCurrent_GPIO_Port, &GPIO_InitStruct);
 
+  /**/
+  HAL_I2CEx_EnableFastModePlus(SYSCFG_PMC_I2C_PB7_FMP);
+
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
 }
@@ -532,17 +593,30 @@ static void MX_GPIO_Init(void)
 // Global ADC Callback
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
     if (hadc->Instance == ADC1) {
-        // Read the converted ADC value
+
+    	init_var();
+
     	GPIOB->ODR |= (1 << 0);
-        adc_result = HAL_ADC_GetValue(hadc);
-        adc_voltage = (adc_result * convert);
 
-        //sprintf (txbuffer, "%.6f\r",adc_voltage);
-        //HAL_UART_Transmit(&huart3, (uint8_t *)txbuffer, strlen(txbuffer), HAL_MAX_DELAY);
-        GPIOB->ODR &= ~(1 << 0);
-        //counter++;
-        // Process adcValue as needed (e.g., store, transmit, or display it)
 
+
+        //dac_result = HAL_DAC_GetValue(&hdac, DAC_CHANNEL_1);
+
+    	x[2] = x[1];
+    	x[1] = x[0];
+    	x[0] = adc_result;
+    	y[2] = y[1];
+    	y[1] = y[0];
+
+    	adc_result = HAL_ADC_GetValue(hadc);
+    	float out =  (( a0 * x[0] + a1 * x[1] + a2 * x[2]) + (b1 * y[1] + b2 * y[2])) * (b0);
+    	y[0] = out;
+
+    	//dac_result = dac_result & 0x0FFF;
+
+    	HAL_DAC_SetValue(&hdac, DAC_CHANNEL_1, DAC_ALIGN_12B_R, y[0]);    			//ADC to filtered ADC output
+
+    	GPIOB->ODR &= ~(1 << 0);
     }
 }
 
